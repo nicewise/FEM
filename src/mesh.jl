@@ -1,40 +1,31 @@
-struct material_para
-    prop1::Float64
-    prop2::Float64
-    prop3::Float64
-    prop4::Float64
-    prop5::Float64
-    prop6::Float64
-    prop7::Float64
-    prop8::Float64
-    prop9::Float64
-    prop10::Float64
-    prop11::Float64
-    prop12::Float64
-    prop13::Float64
-    prop14::Float64
-    prop15::Float64
-end
-material_para(vec::Vector) = begin
-    mat = vcat(vec, fill(0.0, 15 - length(vec)))
-    material_para(mat[1],mat[2],mat[3],mat[4],mat[5],
-                  mat[6],mat[7],mat[8],mat[9],mat[10],
-                  mat[11],mat[12],mat[13],mat[14],mat[15])
-end
-
-struct mesh
+struct fem_mesh{D<:AbstractDimension} <: AbstractMesh{D}
     nodes::Matrix{Float64}
-    elements::Matrix{Int}
-    node_number::Int
-    dimension::Int
     dofs::Int
-    material::material_para
+    thick::Float64
+end
+function fem_mesh_gen(nodes; thick = nothing)
+    dimension, node_number = size(nodes) # 2xnnodes或3xnnodes
+    # 维度检查和厚度验证
+    @assert !(dimension == 2 && isnothing(thick)) "For 2D problem, `thick` must be provided."
+    thick = dimension == 2 ? thick : 1.0
+    dofs = dimension * node_number
+    D = dimension == 1 ? Dim1 :
+        dimension == 2 ? Dim2 :
+        Dimension == 2 ? Dim3 :
+        nothing
+    fem_mesh{D}(nodes, dofs, thick)
+end
+#=
+struct pd_mesh{D<:AbstractDimension} <: AbstractMesh{D}
+    nodes::Matrix{Float64}
+    node_number::Int
+    dofs::Int
     inter_crack::Function
     thick::Float64
     δ::Float64
     dx::Float64
 end
-function mesh_gen(nodes, elements, mat; thick = 0.0, delta = 0.0, dx = 0.0, crack = zeros(0, 4))
+function pd_mesh_gen(nodes, elements, mat; thick = 0.0, delta = 0.0, dx = 0.0, crack = zeros(0, 4))
     dimension, node_number = size(nodes) # 2xnnodes或3xnnodes
 
     # 维度检查和厚度验证
@@ -291,3 +282,4 @@ function vtk_gen_from_h5_ascii2(fn_base::String, i::Int)
     end
     # println("Binary VTK file successfully generated")
 end
+=#

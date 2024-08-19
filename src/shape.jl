@@ -1,44 +1,100 @@
-function B_gen(::Type{feq1}, ref_coords::Vector{Float64}, weight::Float64, coords)
-    ξ, η = ref_coords
-    N_xieta = [η-1  1-η 1+η -1-η
-               ξ-1 -1-ξ 1+ξ  1-ξ] / 4
-    J = N_xieta * coords' #FIXME
-    N_xy = J \ N_xieta
-    B = [N_xy[1,1] 0         N_xy[1,2] 0         N_xy[1,3] 0         N_xy[1,4] 0
-         0         N_xy[2,1] 0         N_xy[2,2] 0         N_xy[2,3] 0         N_xy[2,4]
-         N_xy[2,1] N_xy[1,1] N_xy[2,2] N_xy[1,2] N_xy[2,3] N_xy[1,3] N_xy[2,4] N_xy[1,4]]
-    JxW = weight * det(J)
+"""
+N_r --- the derivative of N to the reference coordinates
+N_g --- the derivative of N to the global coordinates
+JxW --- the product of the determinant of the Jacobian matrix and the weight of quadrature point
+"""
+function B_gen(C::Type, D::Type, ref_coords::Vector{Float64}, weight::Float64, coords::Matrix{Float64})
+    N_r = ∂N_gen(C, ref_coords)
+    N_g, JxW = B_gen(N_r, weight, coords)
+    dim = D <: Dim2 ? 2 : 3
+    dof = dim * size(coords, 2)
+    B = dim == 2 ? zeros(3, dof) : zeros(6, dof)
+    if dim == 2
+        for i in axes(N_g, 1)
+            B[1, 2i-1] = B[3,   2i] = N_g[i, 1]
+            B[2,   2i] = B[3, 2i-1] = N_g[i, 2]
+        end
+    else
+        for i in axes(N_g, 1)
+            B[1, 3i-2] = B[5,   3i] = B[6, 3i-1] = N_g[i, 1]
+            B[2, 3i-1] = B[4,   3i] = B[6, 3i-2] = N_g[i, 2]
+            B[3,   3i] = B[4, 3i-1] = B[5, 3i-2] = N_g[i, 3]
+        end
+    end
+    B[dim+1:end, :] ./= sqrt(2)
     return B, JxW
 end
-function N_gen(::Type{feq1}, ref_coords::Vector{Float64})
-    ξ, η = ref_coords
-    N1 = (1-ξ)*(1-η)/4
-    N2 = (1+ξ)*(1-η)/4
-    N3 = (1+ξ)*(1+η)/4
-    N4 = (1-ξ)*(1+η)/4
-    return [N1, N2, N3, N4]
+@inline function B_gen(N_r::Matrix{Float64}, weight::Float64, coords::Matrix{Float64})
+    J = coords * N_r
+    N_g = N_r / J
+    return N_g, weight * det(J)
 end
 
-function B_gen(::Type{feH1}, ref_coords::Vector{Float64}, weight::Float64, coords)
-    (fe::fedata{feH1}, coors::Matrix{Float64}, gi::Int)
-    ξ, η, ζ = ref_coords
-    N_local = [-(1-η)*(1-ζ)  (1-η)*(1-ζ)  (1+η)*(1-ζ) -(1+η)*(1-ζ) -(1-η)*(1+ζ)  (1-η)*(1+ζ) (1+η)*(1+ζ) -(1+η)*(1+ζ)
-               -(1-ξ)*(1-ζ) -(1+ξ)*(1-ζ)  (1+ξ)*(1-ζ)  (1-ξ)*(1-ζ) -(1-ξ)*(1+ζ) -(1+ξ)*(1+ζ) (1+ξ)*(1+ζ)  (1-ξ)*(1+ζ)
-               -(1-ξ)*(1-η) -(1+ξ)*(1-η) -(1+ξ)*(1+η) -(1-ξ)*(1+η)  (1-ξ)*(1-η)  (1+ξ)*(1-η) (1+ξ)*(1+η)  (1-ξ)*(1+η)] / 8
-    J = N_local * coors # 3x8 x 8x3 = 3x3
-    N_global = J \ N_local # 3x8
-    B = 
-    return(N_global, det(J)*weight)
+
+N_gen(::Type{t1}, ref_coords::Vector{Float64}) = ref_coords
+∂N_gen(::Type{t1}, ref_coords::Vector{Float64}) = [-1 -1
+                                                   1  0
+                                                   0  1]
+
+function N_gen(::Type{t2}, ref_coords::Vector{Float64})
+    L1, L2, L3 = ref_coords
+    [(2L1 - 1) * L1
+     (2L2 - 1) * L2
+     (2L3 - 1) * L3
+     4L1*L2
+     4L2*L3
+     4L3*L1]
 end
-function N_gen(::Type{feH1}, ref_coords::Vector{Float64})
+@inline function ∂N_gen(::Type{t2}, ref_coords::Vector{Float64})
+    L1, L2, L3 = ref_coords
+    [ 1-4L1     1-4L1
+      4L2-1     0
+      0         4L3-1
+      4L1-4L2  -4L2
+      4L3       4L2
+     -4L3       4L1-4L3]
+end
+
+N_gen(::Type{T1}, ref_coords::Vector{Float64}) = ref_coords
+∂N_gen(::Type{T1}, ref_coords::Vector{Float64}) = [-1 -1 -1
+                                                   1  0  0
+                                                   0  1  0
+                                                   0  0  1]
+
+function N_gen(::Type{q1}, ref_coords::Vector{Float64})
+    ξ, η = ref_coords
+    [(1-ξ)*(1-η)
+     (1+ξ)*(1-η)
+     (1+ξ)*(1+η)
+     (1-ξ)*(1+η)] / 4
+end
+@inline function ∂N_gen(::Type{q1}, ref_coords::Vector{Float64})
+    ξ, η = ref_coords
+    [ η-1  ξ-1
+      1-η -1-ξ
+      1+η  1+ξ
+     -1-η  1-ξ] / 4
+end
+
+function N_gen(::Type{H1}, ref_coords::Vector{Float64})
     ξ, η, ζ = ref_coords
-    N1 = (1-ξ)*(1-η)*(1-ζ)/8
-    N2 = (1+ξ)*(1-η)*(1-ζ)/8
-    N3 = (1+ξ)*(1+η)*(1-ζ)/8
-    N4 = (1-ξ)*(1+η)*(1-ζ)/8
-    N5 = (1-ξ)*(1-η)*(1+ζ)/8
-    N6 = (1+ξ)*(1-η)*(1+ζ)/8
-    N7 = (1+ξ)*(1+η)*(1+ζ)/8
-    N8 = (1-ξ)*(1+η)*(1+ζ)/8
-    return [N1, N2, N3, N4, N5, N6, N7, N8]
+    [(1-ξ)*(1-η)*(1-ζ)
+     (1+ξ)*(1-η)*(1-ζ)
+     (1+ξ)*(1+η)*(1-ζ)
+     (1-ξ)*(1+η)*(1-ζ)
+     (1-ξ)*(1-η)*(1+ζ)
+     (1+ξ)*(1-η)*(1+ζ)
+     (1+ξ)*(1+η)*(1+ζ)
+     (1-ξ)*(1+η)*(1+ζ)] / 8
+end
+@inline function ∂N_gen(::Type{H1}, ref_coords::Vector{Float64})
+    ξ, η, ζ = ref_coords
+    [-(1-η)*(1-ζ) -(1-ξ)*(1-ζ) -(1-ξ)*(1-η)
+      (1-η)*(1-ζ) -(1+ξ)*(1-ζ) -(1+ξ)*(1-η)
+      (1+η)*(1-ζ)  (1+ξ)*(1-ζ) -(1+ξ)*(1+η)
+     -(1+η)*(1-ζ)  (1-ξ)*(1-ζ) -(1-ξ)*(1+η)
+     -(1-η)*(1+ζ) -(1-ξ)*(1+ζ)  (1-ξ)*(1-η)
+      (1-η)*(1+ζ) -(1+ξ)*(1+ζ)  (1+ξ)*(1-η)
+      (1+η)*(1+ζ)  (1+ξ)*(1+ζ)  (1+ξ)*(1+η)
+     -(1+η)*(1+ζ)  (1-ξ)*(1+ζ)  (1-ξ)*(1+η)] / 8
 end

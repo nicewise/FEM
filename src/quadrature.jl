@@ -32,7 +32,7 @@ function gauss_legendre(x::Int)
         CM[i, i+1] = CM[i+1, i] = a[i]
     end
     L, V = eigen(CM)
-    w = 2 * V[:, 1].^2
+    w = 2 * V[:, 1].^2 # FIXME 这样子虽然很帅，但是2个积分点情况下，算出来权重是0.999999998，不是1
     [L w]
 end
 function gauss_legendre(x::Int, y::Int)
@@ -94,33 +94,28 @@ function tet_quad(order::Int)
     return(coords[:, s[order, 1]:s[order, 2]], weights[s[order, 1]:s[order, 2]])
 end
 
-function quad_form(mode::Char, p::Int...)
+function quad_form(T::Type, p::Int...)
 
-    # 定义模式到函数的映射
+    # 定义模式到函数和参数数量的映射
     mode_map = Dict(
-        'q' => (params) -> gauss_legendre(params[1], params[2]),
-        'H' => (params) -> gauss_legendre(params[1], params[2], params[3]),
-        't' => (params) -> tri_quad(params[1]),
-        'T' => (params) -> tet_quad(params[1])
+        quadrilateral  => ((params) -> gauss_legendre(params[1], params[2]), 2),
+        Hexahedral => ((params) -> gauss_legendre(params[1], params[2], params[3]), 3),
+        triangular => ((params) -> tri_quad(params[1]), 1),
+        Tetrahedral => ((params) -> tet_quad(params[1]), 1)
     )
 
-    # 查找模式对应的函数
-    func = get(mode_map, mode, nothing)
+    # 确定模式类型
+    mode = T <: triangular ? triangular :
+        T <: quadrilateral ? quadrilateral :
+        T <: Tetrahedral ? Tetrahedral :
+        T <: Hexahedral ? Hexahedral :
+        nothing
+    @assert !isnothing(mode) "Unknown cell type for input type: $(T). Expected one of: $(keys(mode_map))"
 
-    if func === nothing
-        error("The mode '$mode' is not valid. Use one of 't', 'q', 'H', or 'T'.")
-    end
-
+    # 查找模式对应的函数和所需参数数量
+    func, required_params = mode_map[mode]
     # 参数数量检查
-    valid_params = Dict(
-        'q' => 2,
-        'H' => 3,
-        't' => 1,
-        'T' => 1
-    )
-
-    required_params = valid_params[mode]
-    length(p) == required_params || error("For mode '$mode', exactly $required_params parameters are required.")
+    @assert length(p) == required_params "For cell type '$mode', exactly $required_params parameters are required. Provided $(length(p)) parameters. Ensure you provide the correct number of parameters for the specified cell type."
 
     # 调用相应的函数
     return func(p)

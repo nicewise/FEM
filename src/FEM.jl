@@ -1,29 +1,37 @@
 module FEM
-using LinearAlgebra, SparseArrays, HDF5
+using LinearAlgebra, SparseArrays, StaticArrays
 using Base.Threads
-
-include("mesh.jl")
-export
-    mesh,
-    mesh_gen,
-    save_model_h5,
-    vtk_gen_from_h5_binary,
-    vtk_gen_from_h5_ascii,
-    vtk_gen_from_h5_ascii2
 
 include("types.jl")
 export
-    FE,
-    fe2d, fe3d,
-    fet1, fet2, fet3,
-    feq1, feq2, feq3,
-    feT1, feT2, feT3,
-    feH1, feH2, feH3,
-    feP1, feP2, feP3,
+    AbstractCellType,
+    Cell2, Cell3,
+    t1, t2,
+    q1,
+    T1,
+    H1,
+    VertexNumber,
+    assert_vertex_number,
+    AbstractDimension,
+    Dim1, Dim2, Dim3,
+    PlaneStress, PlaneStrain,
     AbstractConstitutiveLaw,
     AbstractQuadraturePoint,
     AbstractElement,
-    AbstractFem
+    AbstractFem,
+    AbstractSolver,
+    solveit,
+    LeftDivisionSolver,
+    AbstractAnalysis,
+    AbstractMesh
+
+include("MandelNotation.jl")
+export  Mandel # some constant tensor
+
+include("mesh.jl")
+export
+    fem_mesh,
+    fem_mesh_gen
 
 include("shape.jl")
 export
@@ -34,27 +42,31 @@ include("quadrature.jl")
 export
     quad_form
 
-include("simple_fem.jl")
+include("linear_elastic_fem.jl")
 export
-    simple_fem_gen,
+    linear_elastic, # <: AbstractFem
     stiffness_assemble
 
 include("general_elastoplastic_fem.jl")
 export
-    fem_gen,
+    quadrature_point, # <: AbstractPoint
+    simple_point_gen, # for constitutive law testing
+    elastoplastic, # <: AbstractFem
+    constitutive_law_apply!,
     elastic_initialization!,
-    elements_stiffness_gen!
+    elements_stiffness_gen!,
+    displacement_apply!
 
 include("popular_constitutive_laws.jl")
 export
-    constitutive_law_apply!,
-    linear_elastic
+    constitutive_linear_elastic
 
-include("solve.jl")
+include("solvers.jl")
+
+include("analysis_procedures.jl")
 export
-    implicit_static_analysis,
-    load_attempt,
-    R_gen!,
-    save_step_data_h5
+    simple_analysis,
+    displacement_load,
+    displacement_converge
 
 end # module FEM
