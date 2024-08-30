@@ -9,13 +9,24 @@ struct quadrature_point{C<:AbstractCellType, Dim<:AbstractDimension} <: Abstract
     JxW::Float64
     statev::Vector{Float64}
 end
-function simple_point_gen(; C::Type = t1, Dim::Type = Dim3, nstatev = 0)
-    return quadrature_point_gen(C,
-                                Dim,
-                                Float64[],
-                                zeros(0, 0),
-                                0.0,
-                                nstatev)
+function simple_point_gen(; Dim::Type = Dim3, nstatev = 0)
+    if Dim <:Dim3
+        return quadrature_point_gen(T1,
+                                    Dim,
+                                    Float64[],
+                                    zeros(0, 0),
+                                    0.0,
+                                    nstatev)
+    elseif Dim <: Dim2
+        return quadrature_point_gen(t1,
+                                    Dim,
+                                    Float64[],
+                                    zeros(0, 0),
+                                    0.0,
+                                    nstatev)
+    else
+        #TODO
+    end
 end
 function quadrature_point_gen(C::Type, Dim::Type, position, B, JxW, nstatev)
     dim = Dim <: Dim2 ? 2 : 3
@@ -25,7 +36,7 @@ function quadrature_point_gen(C::Type, Dim::Type, position, B, JxW, nstatev)
     dε = zeros(nstress)
     σ = zeros(nstress)
     D = zeros(nstress, nstress)
-    D4 = zeros(4, 4)
+    D4 = Dim <: Dim2 ? zeros(4, 4) : zeros(0, 0)
     statev = zeros(nstatev)
 
     quadrature_point{C, Dim}(position, ε, dε, σ, D, D4, B, JxW, statev)
@@ -42,7 +53,7 @@ function quadrature_points_gen(C::Type,
     quadrature_points = Vector{quadrature_point{C, D}}(undef, number_of_quadrature)
 
     for i in 1:number_of_quadrature
-        B, JxW = B_gen(C, D, ref_coords[:, i], weight[i], coords)
+        B, JxW = elastic_B_gen(C, D, ref_coords[:, i], weight[i], coords)
         quadrature_points[i] = quadrature_point_gen(C, D, coords * N[i], B, JxW, nstatev)
     end
 
@@ -130,11 +141,11 @@ struct elastoplastic{C<:AbstractCellType, D<:AbstractDimension} <: AbstractFem{C
 end
 
 function elastoplastic(T::Type, e, n, x...; kwargs...)
-   node_per_element = assert_vertex_number(T, e)
+    node_per_element = assert_vertex_number(T, e)
 
     params = Dict(
         :nstatev => 0,
-        :planestrain => false,
+        :isplanestrain => nothing,
         :E => 0.0,
         :ν => 0.0
     )
@@ -187,22 +198,6 @@ function elastoplastic(T::Type, e, n, x...; kwargs...)
                         ν)
 end
 
-function element_stiffness_gen!(element::AbstractCell, dpe::Int, thick::Float64)
-    ndof = length(element.dof)
-    V = zeros(dpe, ndof)
-    for qpoint in element.quadrature_points
-        V += qpoint.B' * qpoint.D * qpoint.B * qpoint.JxW * thick
-    end
-    element.V .= vec(V)
-    return nothing
-end
-
-function elements_stiffness_gen!(fe::AbstractFem{<:AbstractCellType, D}, thick::Float64) where D<:AbstractDimension
-    thick = D <: Dim2 ? thick : 1.0
-    @threads for element in fe.elements
-        element_stiffness_gen!(element, fe.dof_per_element, thick)
-    end
-end
 function K_gen(fe::AbstractFem, dofs::Int)
     n = fe.dof_per_element^2
     element_number = size(fe.element_table, 2)
@@ -217,14 +212,6 @@ function K_gen(fe::AbstractFem, dofs::Int)
         end
     end
     sparse(Is, Js, Vs, dofs, dofs)    
-end
-stiffness_assemble(fe::AbstractFem, dofs::Int) = K_gen(fe, dofs)
-
-function constitutive_law_apply!(F::AbstractConstitutiveLaw, fe::AbstractFem)
-    @threads for point in fe.quadrature_points
-        constitutive_law_apply!(F, point)
-    end
-    return nothing
 end
 function elastic_initialization!(fe::AbstractFem{<:AbstractCellType, D}, mesh, E::Float64, ν::Float64) where D<:AbstractDimension
     cl = constitutive_linear_elastic{D}(E, ν)
@@ -259,4 +246,62 @@ function displacement_apply!(fe::AbstractFem; u::Vector{Float64}=Float64[], du::
             delta_displacement_apply!(element, du[element.dof])
         end
     end
+end
+
+function constitutive_law_apply!(F::AbstractConstitutiveLaw, fe::AbstractFem; kwargs...)
+    @threads for point in fe.quadrature_points
+        constitutive_law_apply!(F, point; kwargs...)
+    end
+    return nothing
+end
+
+function element_stiffness_gen!(element::AbstractCell, dpe::Int, thick::Float64)
+    ndof = length(element.dof)
+    V = zeros(dpe, ndof)
+    for qpoint in element.quadrature_points
+        V += qpoint.B' * qpoint.D * qpoint.B * qpoint.JxW * thick
+    end
+    element.V .= vec(V)
+    return nothing
+end
+function elements_stiffness_gen!(fe::AbstractFem{<:AbstractCellType, D}, thick::Float64) where D<:AbstractDimension
+    thick = D <: Dim2 ? thick : 1.0
+    @threads for element in fe.elements
+        element_stiffness_gen!(element, fe.dof_per_element, thick)
+    end
+end
+stiffness_assemble!(fe::AbstractFem, mesh::AbstractMesh) = begin
+    elements_stiffness_gen!(fe, mesh.thick)
+    K_gen(fe, mesh.dofs)
+end
+
+function internal_force_gen!(e::AbstractCell)
+    F = zeros(length(e.F))
+    for p in e.quadrature_points
+        F += p.B' * p.σ * p.JxW
+    end
+    e.F .= F
+    return nothing
+end
+function internal_force_gen!(fe::AbstractFem)
+    @threads for e in fe.elements
+        internal_force_gen!(e)
+    end
+    return nothing
+end
+function internal_force_assemble(fe, dofs)
+    f_int = zeros(dofs)
+    for e in fe.elements
+        f_int[e.dof] += e.F
+    end
+    return f_int
+end
+internal_force_assemble!(fe, mesh) = begin
+    internal_force_gen!(fe)
+    internal_force_assemble(fe, mesh.dofs)
+end
+elastic_system_assemble!(fe, mesh) = begin
+    elements_stiffness_gen!(fe, mesh.thick)
+    internal_force_gen!(fe)
+    return K_gen(fe, mesh.dofs), internal_force_assemble(fe, mesh.dofs)
 end

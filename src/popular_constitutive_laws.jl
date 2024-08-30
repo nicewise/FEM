@@ -29,6 +29,7 @@ function constitutive_law_apply!(F::constitutive_linear_elastic, p::AbstractPoin
     ε = p.ε + p.dε
     p.σ .= F.D * ε
     p.D .= F.D
+    return nothing
 end
 
 struct vm_iso{T<:Dim3} <: AbstractConstitutiveLaw{T}
@@ -78,3 +79,145 @@ function constitutive_law_apply!(F::vm_iso{T}, p::AbstractPoint{<:AbstractCellTy
     p.σ .= σ
     return nothing
 end
+
+abstract type AbstractRd end
+struct R1 <: AbstractRd
+    rc::Float64
+    dc::Float64
+end
+Rd(R::R1, d) = 4d*R.dc*R.rc/(d + R.dc)^2
+
+function Rd_gen(filter::Int, p::Float64...)
+    R_map = Dict(
+        1 => R1(p[1], p[2])
+        # TODO
+    )
+    return R_map[filter]
+end
+
+#FIXME delute跑不出正确的本构曲线
+# 对于pcw，体积模量和剪切模量不劣化到小于0已经解决了问题
+# 但是delute不知道问题在哪
+struct elastic_damage{T<:Dim3} <: AbstractConstitutiveLaw{T}
+    a::Float64
+    x::Int
+    y::Int
+    k3::Float64
+    μ2::Float64
+    weaken_ratio::Dict{Bool, NTuple{4, Function}}
+    isopen::Function
+    Rd::AbstractRd
+    tol::Float64
+
+    function elastic_damage{T}(S::Symbol, E::Float64, ν::Float64, Rd::AbstractRd; tol::Float64 = 1e-6, l::Float64 = 0) where T
+        β1 = 16(1 - ν^2) / 9(1 - 2ν)
+        β2 = 32(1 - ν) / 15(2 - ν)
+        ϑ = (5 - ν) / 3
+        weaken_ratio = Dict(
+            :DELUTE => Dict(
+                true => (
+                    d -> max(1e-10, 1 - β1 * d),
+                    d -> - β1,
+
+                    d -> max(1e-10, 1 - β2 * ϑ * d),
+                    d -> - β2 * ϑ
+                ),
+                false => (
+                    d -> 1,
+                    d -> 0,
+
+                    d -> max(1e-10, 1 - β2 * d),
+                    d -> - β2
+                )
+            ),
+            :MT => Dict(
+                true => (
+                    d -> 1 / (1 + β1 * d),
+                    d -> - β1 / (1 + β1 * d)^2,
+
+                    d -> 1 / (1 + β2 * ϑ * d),
+                    d -> - β2 * ϑ / (1 + β2 * ϑ * d)^2
+                ),
+                false => (
+                    d -> 1,
+                    d -> 0,
+
+                    d -> 1 / (1 + β2 * d),
+                    d -> - β2 / (1 + β2 * d)^2
+                )
+            ),
+            :PCW => Dict(
+                true => (
+                    d -> max(1e-10, 1 - 16(1 - ν^2)d / ( 9(1 - 2ν) + 16/3*(1 + ν)^2 * d )),
+                    d -> 1296(1 - 2ν)*(ν^2 - 1)/(16d*(ν + 1)^2 - 54ν + 27)^2,
+
+                    d -> max(1e-10, 1 - 480(1 - ν)ϑ * d / ( 225(2 - ν) + 64(4 - 5ν)ϑ * d )),
+                    d -> 324000(ν - 5)*(ν - 2)*(ν - 1)/(64d*(ν - 5)*(5ν - 4) - 675ν + 1350)^2
+                ),
+                false => (
+                    d -> 1,
+                    d -> 0,
+
+                    d -> max(1e-10, 1 - 480(1 - ν)d / ( 225(2 - ν) + 64(4 - 5ν)d )),
+                    d -> -108000(ν - 2)*(ν - 1)/(320d*ν - 256d + 225ν - 450)^2
+                )
+            )
+        )
+
+        k3 = E / (1 - 2ν)
+        μ2 = E / (1 + ν)
+        D = k3 * Mandel.J + μ2 * Mandel.K
+        isopen = x -> sum(x .* Mandel.δ) / 3 >= 0
+        return new{T}(l, 1, 2, k3, μ2, weaken_ratio[S], isopen, Rd, tol)
+    end
+end
+
+function constitutive_law_apply!(F::elastic_damage{T}, p::AbstractPoint{<:AbstractCellType, T}; before_gradient::Union{Nothing, Bool}=nothing) where T<:Dim3
+    if isnothing(before_gradient)
+        d = p.statev[1]
+        ε = p.ε + p.dε
+        kd, dkd, μd, dμd = F.weaken_ratio[F.isopen(p.D * ε)]
+        k3 = F.k3
+        μ2 = F.μ2
+        g(x) = -ε' * (dkd(d+x) * k3 * Mandel.J + dμd(d+x) * μ2 * Mandel.K) * ε / 2 - Rd(F.Rd, d+x)
+        if g(0.) > F.tol
+            d += Roots.find_zero(g, 0.0)
+        end
+        Chom = kd(d) * k3 * Mandel.J + μd(d) * μ2 * Mandel.K
+        p.D .= Chom
+        p.σ .= Chom * ε
+        p.statev[1] = d
+        return nothing
+    elseif before_gradient
+        d = p.statev[1]
+        ε = p.ε + p.dε
+        _, dkd, _, dμd = F.weaken_ratio[F.isopen(p.D * ε)]
+        k3 = F.k3
+        μ2 = F.μ2
+        g(x) = -ε' * (dkd(d+x) * k3 * Mandel.J + dμd(d+x) * μ2 * Mandel.K) * ε / 2 - Rd(F.Rd, d+x)
+        if g(0.) > F.tol
+            d += Roots.find_zero(g, 0.0)
+        end
+        p.statev[1] = d
+        return nothing
+    else
+        d = p.statev[2]
+        ε = p.ε + p.dε
+        kd, _, μd, _ = F.weaken_ratio[F.isopen(p.D * ε)]
+        Chom = kd(d) * k3 * Mandel.J + μd(d) * μ2 * Mandel.K
+        p.D .= Chom
+        p.σ .= Chom * ε
+        return nothing
+    end
+end
+
+
+
+struct PDMT end
+struct PDPCW end
+struct AEDPCW end
+
+
+
+
+struct APDPCW end

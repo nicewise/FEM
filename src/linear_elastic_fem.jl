@@ -65,7 +65,7 @@ function element_stiffness_gen(fe::linear_elastic{C, D}, mesh, element_index) wh
     cl = constitutive_linear_elastic{D}(fe.E, fe.ν)
     V = zeros(fe.dof_per_element, fe.dof_per_element)
     for i in 1:fe.number_of_quadrature
-        B, JxW = B_gen(C, D, fe.ref_coords[:, i], fe.weights[i], coords)
+        B, JxW = elastic_B_gen(C, D, fe.ref_coords[:, i], fe.weights[i], coords)
         V += B' * cl.D * B * JxW * mesh.thick
     end
     dof = vec(hcat(2*node_index .- 1, 2*node_index)')

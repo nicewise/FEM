@@ -3,11 +3,14 @@ N_r --- the derivative of N to the reference coordinates
 N_g --- the derivative of N to the global coordinates
 JxW --- the product of the determinant of the Jacobian matrix and the weight of quadrature point
 """
-function B_gen(C::Type, D::Type, ref_coords::Vector{Float64}, weight::Float64, coords::Matrix{Float64})
-    N_r = ∂N_gen(C, ref_coords)
-    N_g, JxW = B_gen(N_r, weight, coords)
+function elastic_B_gen(C::Type, D::Type, ref_coords::Vector{Float64}, weight::Float64, coords::Matrix{Float64})
+    N_g, JxW = B_gen(C, ref_coords, weight, coords)
+    B = elastic_B_gen(D, N_g, size(coords, 2))
+    return B, JxW
+end
+function elastic_B_gen(D::Type, N_g::Matrix{Float64}, node_number)
     dim = D <: Dim2 ? 2 : 3
-    dof = dim * size(coords, 2)
+    dof = dim * node_number
     B = dim == 2 ? zeros(3, dof) : zeros(6, dof)
     if dim == 2
         for i in axes(N_g, 1)
@@ -22,8 +25,11 @@ function B_gen(C::Type, D::Type, ref_coords::Vector{Float64}, weight::Float64, c
         end
     end
     B[dim+1:end, :] ./= sqrt(2)
-    return B, JxW
+    return B
 end
+B_gen(C::Type, ref_coords::Vector{Float64}, weight::Float64, coords::Matrix{Float64}) =
+    B_gen(N_r_gen(C, ref_coords), weight, coords)
+
 @inline function B_gen(N_r::Matrix{Float64}, weight::Float64, coords::Matrix{Float64})
     J = coords * N_r
     N_g = N_r / J
@@ -32,9 +38,9 @@ end
 
 
 N_gen(::Type{t1}, ref_coords::Vector{Float64}) = ref_coords
-∂N_gen(::Type{t1}, ref_coords::Vector{Float64}) = [-1 -1
-                                                   1  0
-                                                   0  1]
+N_r_gen(::Type{t1}, ref_coords::Vector{Float64}) = [-1 -1.0
+                                                     1  0
+                                                     0  1]
 
 function N_gen(::Type{t2}, ref_coords::Vector{Float64})
     L1, L2, L3 = ref_coords
@@ -45,7 +51,7 @@ function N_gen(::Type{t2}, ref_coords::Vector{Float64})
      4L2*L3
      4L3*L1]
 end
-@inline function ∂N_gen(::Type{t2}, ref_coords::Vector{Float64})
+@inline function N_r_gen(::Type{t2}, ref_coords::Vector{Float64})
     L1, L2, L3 = ref_coords
     [ 1-4L1     1-4L1
       4L2-1     0
@@ -56,10 +62,10 @@ end
 end
 
 N_gen(::Type{T1}, ref_coords::Vector{Float64}) = ref_coords
-∂N_gen(::Type{T1}, ref_coords::Vector{Float64}) = [-1 -1 -1
-                                                   1  0  0
-                                                   0  1  0
-                                                   0  0  1]
+N_r_gen(::Type{T1}, ref_coords::Vector{Float64}) = [-1 -1 -1.0
+                                                     1  0  0
+                                                     0  1  0
+                                                     0  0  1]
 
 function N_gen(::Type{q1}, ref_coords::Vector{Float64})
     ξ, η = ref_coords
@@ -68,7 +74,7 @@ function N_gen(::Type{q1}, ref_coords::Vector{Float64})
      (1+ξ)*(1+η)
      (1-ξ)*(1+η)] / 4
 end
-@inline function ∂N_gen(::Type{q1}, ref_coords::Vector{Float64})
+@inline function N_r_gen(::Type{q1}, ref_coords::Vector{Float64})
     ξ, η = ref_coords
     [ η-1  ξ-1
       1-η -1-ξ
@@ -87,7 +93,7 @@ function N_gen(::Type{H1}, ref_coords::Vector{Float64})
      (1+ξ)*(1+η)*(1+ζ)
      (1-ξ)*(1+η)*(1+ζ)] / 8
 end
-@inline function ∂N_gen(::Type{H1}, ref_coords::Vector{Float64})
+@inline function N_r_gen(::Type{H1}, ref_coords::Vector{Float64})
     ξ, η, ζ = ref_coords
     [-(1-η)*(1-ζ) -(1-ξ)*(1-ζ) -(1-ξ)*(1-η)
       (1-η)*(1-ζ) -(1+ξ)*(1-ζ) -(1+ξ)*(1-η)

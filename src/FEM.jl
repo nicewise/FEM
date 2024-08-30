@@ -1,10 +1,13 @@
 module FEM
 using LinearAlgebra, SparseArrays, StaticArrays
 using Base.Threads
+import ScatteredInterpolation, JLD2, Roots
 
 include("types.jl")
 export
     AbstractCellType,
+    AbstractBeam,
+    AbstractBond,
     Cell2, Cell3,
     t1, t2,
     q1,
@@ -16,14 +19,15 @@ export
     Dim1, Dim2, Dim3,
     PlaneStress, PlaneStrain,
     AbstractConstitutiveLaw,
-    AbstractQuadraturePoint,
-    AbstractElement,
+    AbstractPoint,
+    AbstractCell,
     AbstractFem,
     AbstractSolver,
     solveit,
     LeftDivisionSolver,
+    AbstractMesh,
     AbstractAnalysis,
-    AbstractMesh
+    AbstractRecorder
 
 include("MandelNotation.jl")
 export  Mandel # some constant tensor
@@ -35,8 +39,9 @@ export
 
 include("shape.jl")
 export
+    N_gen,
     B_gen,
-    N_gen
+    elastic_B_gen
 
 include("quadrature.jl")
 export
@@ -52,14 +57,29 @@ export
     quadrature_point, # <: AbstractPoint
     simple_point_gen, # for constitutive law testing
     elastoplastic, # <: AbstractFem
-    constitutive_law_apply!,
     elastic_initialization!,
-    elements_stiffness_gen!,
-    displacement_apply!
+    displacement_apply!,
+    constitutive_law_apply!,
+    stiffness_assemble!,
+    internal_force_assemble!,
+    elastic_system_assemble!
+
+include("gradient_enhanced_fem.jl")
+export
+    gradient_stiffness_assemble,
+    gradient_rhs_gen,
+    gradient_apply!
 
 include("popular_constitutive_laws.jl")
 export
-    constitutive_linear_elastic
+    constitutive_linear_elastic,
+    AbstractRd,
+    Rd_gen,
+    Rd,
+    elastic_damage,
+    gradient_elastic_damage,
+    before_gradient!,
+    after_gradient!
 
 include("solvers.jl")
 
@@ -67,6 +87,15 @@ include("analysis_procedures.jl")
 export
     simple_analysis,
     displacement_load,
-    displacement_converge
+    displacement_converge,
+    record!,
+    testcon, # <: AbstractRecorder
+    testcon!,
+    fem_recorder, # <: AbstractRecorder
+    displacement_control!,
+    gradient_displacement_control!
+
+include("painters.jl")
+export plot2vtu
 
 end # module FEM

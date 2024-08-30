@@ -54,5 +54,7 @@ abstract type AbstractSolver end
 struct LeftDivisionSolver <: AbstractSolver end
 solveit(solver::LeftDivisionSolver, A, b) =  A \ b
 
-abstract type AbstractAnalysis end
 abstract type AbstractMesh{D<:AbstractDimension} end
+abstract type AbstractAnalysis end
+abstract type AbstractRecorder end
+
